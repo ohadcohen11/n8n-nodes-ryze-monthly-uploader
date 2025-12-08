@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-ryze-monthly-uploader",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "n8n community node for uploading monthly data to AWS S3 for discrepancy analysis with automatic multi-brand support and complete object deduplication",
 	"license": "MIT",
 	"homepage": "",
