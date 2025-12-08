@@ -243,18 +243,22 @@ export class RyzeMonthlyUploader implements INodeType {
 		});
 
 		const brandGroups = new Map<string, BrandGroupResult>();
+		const brandGroupErrors: Record<string, string> = {};
+
 		for (const ioId of ioIds) {
 			try {
-				const [rows] = await connection.execute(
-					`SELECT
-						bg.id as brand_group_id,
-						bg.name as brand_group_name
-					FROM ${boDatabase}.out_brands AS b
-					LEFT JOIN ${boDatabase}.brands_groups AS bg ON b.brands_group_id = bg.id
-					WHERE b.mongodb_id = ?
-					LIMIT 1`,
-					[ioId],
-				);
+				// Trim whitespace from IO ID
+				const cleanIoId = ioId.trim();
+
+				const query = `SELECT
+					bg.id as brand_group_id,
+					bg.name as brand_group_name
+				FROM ${boDatabase}.out_brands AS b
+				LEFT JOIN ${boDatabase}.brands_groups AS bg ON b.brands_group_id = bg.id
+				WHERE b.mongodb_id = ?
+				LIMIT 1`;
+
+				const [rows] = await connection.execute(query, [cleanIoId]);
 
 				if (Array.isArray(rows) && rows.length > 0) {
 					const row = rows[0] as { brand_group_id: number; brand_group_name: string };
@@ -263,16 +267,20 @@ export class RyzeMonthlyUploader implements INodeType {
 						brand_group_name: row.brand_group_name,
 					});
 				} else {
+					// Query succeeded but returned no rows
 					brandGroups.set(ioId, {
 						brand_group_id: 'NotFoundBrandGroupID',
 						brand_group_name: 'Unknown Brand',
 					});
+					brandGroupErrors[ioId] = `No rows returned from query for mongodb_id: '${cleanIoId}' (database: ${boDatabase})`;
 				}
-			} catch {
+			} catch (err) {
+				const errorMessage = err instanceof Error ? err.message : String(err);
 				brandGroups.set(ioId, {
 					brand_group_id: 'NotFoundBrandGroupID',
 					brand_group_name: 'Unknown Brand',
 				});
+				brandGroupErrors[ioId] = `Database error: ${errorMessage}`;
 			}
 		}
 
@@ -398,6 +406,7 @@ export class RyzeMonthlyUploader implements INodeType {
 				deduplication_ms: dedupDuration,
 				...(s3UploadTotalMs > 0 && { s3_upload_total_ms: s3UploadTotalMs }),
 			},
+			...(Object.keys(brandGroupErrors).length > 0 && { brand_group_errors: brandGroupErrors }),
 		};
 
 		return [[{ json: output }]];
