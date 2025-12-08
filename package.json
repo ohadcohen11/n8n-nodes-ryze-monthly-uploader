@@ -1,5 +1,5 @@
 {
-	"name": "n8n-nodes-<...>",
+	"name": "n8n-nodes-ryze-monthly-uploader",
 	"version": "0.1.0",
 	"description": "",
 	"license": "MIT",
@@ -8,12 +8,12 @@
 		"n8n-community-node-package"
 	],
 	"author": {
-		"name": "",
-		"email": ""
+		"name": "Ryze Beyond",
+		"email": "ohad.cohen@ryzebeyond.com"
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/<...>/n8n-nodes-<...>.git"
+		"url": "https://github.com/ohadcohen11/n8n-nodes-ryze-monthly-uploader.git"
 	},
 	"scripts": {
 		"build": "n8n-node build",
