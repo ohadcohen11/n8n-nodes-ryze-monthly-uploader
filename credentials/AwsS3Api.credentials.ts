@@ -5,10 +5,11 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 
-export class AwsS3 implements ICredentialType {
-	name = 'awsS3';
-	displayName = 'AWS S3';
+export class AwsS3Api implements ICredentialType {
+	name = 'awsS3Api';
+	displayName = 'AWS S3 API';
 	documentationUrl = 'https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html';
+	icon = 'file:aws.svg' as const;
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Access Key ID',

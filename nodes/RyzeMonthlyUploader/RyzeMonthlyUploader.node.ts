@@ -6,7 +6,9 @@ import type {
 	ICredentialDataDecryptedObject,
 } from 'n8n-workflow';
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
+// eslint-disable-next-line @n8n/community-nodes/no-restricted-imports
 import * as mysql from 'mysql2/promise';
+// eslint-disable-next-line @n8n/community-nodes/no-restricted-imports
 import * as AWS from 'aws-sdk';
 
 interface BrandGroupResult {
@@ -49,16 +51,17 @@ export class RyzeMonthlyUploader implements INodeType {
 		},
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
+		usableAsTool: true,
 		credentials: [
 			{
-				name: 'awsS3',
+				name: 'awsS3Api',
 				required: true,
 				displayOptions: {
 					show: {},
 				},
 			},
 			{
-				name: 'mySql',
+				name: 'mySqlApi',
 				required: true,
 				displayOptions: {
 					show: {},
@@ -148,14 +151,14 @@ export class RyzeMonthlyUploader implements INodeType {
 						name: 'dryRun',
 						type: 'boolean',
 						default: false,
-						description: 'Test mode - generates CSV and checks brand_group but doesn\'t upload to S3',
+						description: 'Whether to run in test mode - generates CSV and checks brand_group but doesn\'t upload to S3',
 					},
 					{
 						displayName: 'Verbose Logging',
 						name: 'verboseLogging',
 						type: 'boolean',
 						default: false,
-						description: 'Include detailed debug information in output',
+						description: 'Whether to include detailed debug information in output',
 					},
 				],
 			},
@@ -182,8 +185,8 @@ export class RyzeMonthlyUploader implements INodeType {
 		const dryRun = options.dryRun || false;
 
 		// Get credentials
-		const awsCredentials = (await this.getCredentials('awsS3')) as ICredentialDataDecryptedObject;
-		const mysqlCredentials = (await this.getCredentials('mySql')) as ICredentialDataDecryptedObject;
+		const awsCredentials = (await this.getCredentials('awsS3Api')) as ICredentialDataDecryptedObject;
+		const mysqlCredentials = (await this.getCredentials('mySqlApi')) as ICredentialDataDecryptedObject;
 
 		// Initialize AWS S3
 		const s3 = new AWS.S3({
@@ -265,7 +268,7 @@ export class RyzeMonthlyUploader implements INodeType {
 						brand_group_name: 'Unknown Brand',
 					});
 				}
-			} catch (error) {
+			} catch {
 				brandGroups.set(ioId, {
 					brand_group_id: 'NotFoundBrandGroupID',
 					brand_group_name: 'Unknown Brand',
@@ -354,10 +357,10 @@ export class RyzeMonthlyUploader implements INodeType {
 					uploadResult.console_url = `https://s3.console.aws.amazon.com/s3/object/${s3BucketName}?prefix=${s3Key}`;
 					uploadResult.upload_duration_ms = uploadDuration;
 					uploadResult.upload_success = true;
-				} catch (error) {
+				} catch (err) {
 					uploadResult.upload_success = false;
-					if (error instanceof Error) {
-						throw new NodeOperationError(this.getNode(), `S3 Upload Error: ${error.message}`);
+					if (err instanceof Error) {
+						throw new NodeOperationError(this.getNode(), `S3 Upload Error: ${err.message}`);
 					}
 				}
 			}
@@ -403,14 +406,14 @@ export class RyzeMonthlyUploader implements INodeType {
 
 // Helper function to deduplicate by complete object
 function deduplicateByCompleteObject(
-	items: any[],
-): { unique: any[]; duplicatesRemoved: number } {
-	const uniqueRecords: any[] = [];
+	items: Record<string, unknown>[],
+): { unique: Record<string, unknown>[]; duplicatesRemoved: number } {
+	const uniqueRecords: Record<string, unknown>[] = [];
 	const seen = new Set<string>();
 
 	for (const item of items) {
 		// Sort keys for consistent comparison
-		const sortedItem: any = {};
+		const sortedItem: Record<string, unknown> = {};
 		Object.keys(item)
 			.sort()
 			.forEach((key) => {
@@ -432,7 +435,7 @@ function deduplicateByCompleteObject(
 }
 
 // Helper function to generate CSV
-function generateCSV(records: any[]): string {
+function generateCSV(records: Record<string, unknown>[]): string {
 	if (records.length === 0) {
 		return '';
 	}

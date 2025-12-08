@@ -5,10 +5,11 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 
-export class MySql implements ICredentialType {
-	name = 'mySql';
-	displayName = 'MySQL';
+export class MySqlApi implements ICredentialType {
+	name = 'mySqlApi';
+	displayName = 'MySQL API';
 	documentationUrl = 'https://dev.mysql.com/doc/';
+	icon = 'file:mysql.svg' as const;
 	properties: INodeProperties[] = [
 		{
 			displayName: 'Host',
