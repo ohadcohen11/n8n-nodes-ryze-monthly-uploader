@@ -32,15 +32,23 @@
 		"strict": true,
 		"credentials": [
 			"dist/credentials/GithubIssuesApi.credentials.js",
-			"dist/credentials/GithubIssuesOAuth2Api.credentials.js"
+			"dist/credentials/GithubIssuesOAuth2Api.credentials.js",
+			"dist/credentials/AwsS3.credentials.js",
+			"dist/credentials/MySql.credentials.js"
 		],
 		"nodes": [
 			"dist/nodes/GithubIssues/GithubIssues.node.js",
-			"dist/nodes/Example/Example.node.js"
+			"dist/nodes/Example/Example.node.js",
+			"dist/nodes/RyzeMonthlyUploader/RyzeMonthlyUploader.node.js"
 		]
+	},
+	"dependencies": {
+		"aws-sdk": "^2.1691.0",
+		"mysql2": "^3.11.5"
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",
+		"@types/node": "^22.10.2",
 		"eslint": "9.32.0",
 		"prettier": "3.6.2",
 		"release-it": "^19.0.4",
