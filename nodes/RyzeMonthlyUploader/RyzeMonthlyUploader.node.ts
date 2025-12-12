@@ -33,6 +33,10 @@ interface UploadResult {
 	upload_duration_ms?: number;
 	upload_success: boolean;
 	dry_run?: boolean;
+	mode?: 'new' | 'merged';
+	existing_rows_found?: number;
+	new_rows_added?: number;
+	total_rows_after_merge?: number;
 }
 
 export class RyzeMonthlyUploader implements INodeType {
@@ -147,6 +151,13 @@ export class RyzeMonthlyUploader implements INodeType {
 						description: 'Database name for brand_group lookup',
 					},
 					{
+						displayName: 'Append Mode',
+						name: 'appendMode',
+						type: 'boolean',
+						default: true,
+						description: 'Whether to merge with existing S3 files instead of overwriting. When enabled, checks if file exists and merges data with deduplication.',
+					},
+					{
 						displayName: 'Dry Run Mode',
 						name: 'dryRun',
 						type: 'boolean',
@@ -176,12 +187,14 @@ export class RyzeMonthlyUploader implements INodeType {
 		const options = this.getNodeParameter('options', 0, {}) as {
 			s3BucketName?: string;
 			boDatabase?: string;
+			appendMode?: boolean;
 			dryRun?: boolean;
 			verboseLogging?: boolean;
 		};
 
 		const s3BucketName = options.s3BucketName || 'ryze-data-brand-performance';
 		const boDatabase = options.boDatabase || 'bo';
+		const appendMode = options.appendMode !== false; // default true
 		const dryRun = options.dryRun || false;
 
 		// Get credentials
@@ -234,16 +247,24 @@ export class RyzeMonthlyUploader implements INodeType {
 
 		// Query brand groups from MySQL
 		const mysqlQueryStart = Date.now();
-		const connection = await mysql.createConnection({
+		const connectionConfig = {
 			host: mysqlCredentials.host as string,
 			port: mysqlCredentials.port as number,
 			database: boDatabase,
 			user: mysqlCredentials.user as string,
 			password: mysqlCredentials.password as string,
-		});
+		};
+
+		const connection = await mysql.createConnection(connectionConfig);
 
 		const brandGroups = new Map<string, BrandGroupResult>();
 		const brandGroupErrors: Record<string, string> = {};
+		const debugInfo: Record<string, unknown> = {
+			connection_host: connectionConfig.host,
+			connection_port: connectionConfig.port,
+			connection_database: connectionConfig.database,
+			connection_user: connectionConfig.user,
+		};
 
 		for (const ioId of ioIds) {
 			try {
@@ -259,6 +280,13 @@ export class RyzeMonthlyUploader implements INodeType {
 				LIMIT 1`;
 
 				const [rows] = await connection.execute(query, [cleanIoId]);
+
+				// Debug: Store query info
+				debugInfo[`query_${cleanIoId}`] = {
+					query: query.replace(/\s+/g, ' ').trim(),
+					params: [cleanIoId],
+					rows_returned: Array.isArray(rows) ? rows.length : 0,
+				};
 
 				if (Array.isArray(rows) && rows.length > 0) {
 					const row = rows[0] as { brand_group_id: number; brand_group_name: string };
@@ -312,20 +340,58 @@ export class RyzeMonthlyUploader implements INodeType {
 				brandItems.map((item) => item.json),
 			);
 
-			const uniqueRecords = deduplicateResult.unique;
-			const duplicatesRemoved = deduplicateResult.duplicatesRemoved;
+			let uniqueRecords = deduplicateResult.unique;
+			let duplicatesRemoved = deduplicateResult.duplicatesRemoved;
 
 			totalRowsAfterDedup += uniqueRecords.length;
 			totalDuplicatesRemoved += duplicatesRemoved;
+
+			// Generate S3 path
+			const fileName = `${ioId}_${scriptId}_${uploadType}.csv`;
+			const s3Key = `AutomationDiscrepancy/${year}/${month}/${brandGroup.brand_group_id}/${fileName}`;
+
+			// Check if file exists and merge if appendMode is enabled
+			let existingRowsFound = 0;
+			let newRowsAdded = uniqueRecords.length;
+			let mode: 'new' | 'merged' = 'new';
+
+			if (appendMode && !dryRun) {
+				try {
+					// Check if file exists in S3
+					await s3.headObject({ Bucket: s3BucketName, Key: s3Key }).promise();
+
+					// File exists, download and merge
+					const existingFile = await s3
+						.getObject({ Bucket: s3BucketName, Key: s3Key })
+						.promise();
+					const existingCsvContent = existingFile.Body?.toString('utf-8') || '';
+					const existingRecords = parseCSV(existingCsvContent);
+
+					existingRowsFound = existingRecords.length;
+
+					// Merge existing with new records
+					const combinedRecords = [...existingRecords, ...uniqueRecords];
+
+					// Deduplicate combined records
+					const mergedDeduplicateResult = deduplicateByCompleteObject(combinedRecords);
+					uniqueRecords = mergedDeduplicateResult.unique;
+
+					// Calculate new rows added after merge
+					newRowsAdded = uniqueRecords.length - existingRowsFound;
+					duplicatesRemoved =
+						deduplicateResult.duplicatesRemoved + mergedDeduplicateResult.duplicatesRemoved;
+
+					mode = 'merged';
+				} catch (err) {
+					// File doesn't exist (404) or other error, treat as new file
+					mode = 'new';
+				}
+			}
 
 			// Generate CSV
 			const csv = generateCSV(uniqueRecords);
 			const sizeKb = Math.round((Buffer.byteLength(csv, 'utf8') / 1024) * 100) / 100;
 			totalSizeKb += sizeKb;
-
-			// Generate S3 path
-			const fileName = `${ioId}_${scriptId}_${uploadType}.csv`;
-			const s3Key = `AutomationDiscrepancy/${year}/${month}/${brandGroup.brand_group_id}/${fileName}`;
 
 			const uploadResult: UploadResult = {
 				type: uploadType,
@@ -338,6 +404,12 @@ export class RyzeMonthlyUploader implements INodeType {
 				duplicates_removed: duplicatesRemoved,
 				size_kb: sizeKb,
 				upload_success: false,
+				mode,
+				...(mode === 'merged' && {
+					existing_rows_found: existingRowsFound,
+					new_rows_added: newRowsAdded,
+					total_rows_after_merge: uniqueRecords.length,
+				}),
 			};
 
 			if (dryRun) {
@@ -407,6 +479,7 @@ export class RyzeMonthlyUploader implements INodeType {
 				...(s3UploadTotalMs > 0 && { s3_upload_total_ms: s3UploadTotalMs }),
 			},
 			...(Object.keys(brandGroupErrors).length > 0 && { brand_group_errors: brandGroupErrors }),
+			debug: debugInfo,
 		};
 
 		return [[{ json: output }]];
@@ -469,4 +542,37 @@ function generateCSV(records: Record<string, unknown>[]): string {
 	});
 
 	return [headers, ...rows].join('\n');
+}
+
+// Helper function to parse CSV
+function parseCSV(csvContent: string): Record<string, unknown>[] {
+	if (!csvContent || csvContent.trim().length === 0) {
+		return [];
+	}
+
+	const lines = csvContent.split('\n').filter((line) => line.trim().length > 0);
+	if (lines.length === 0) {
+		return [];
+	}
+
+	const headers = lines[0].split(',');
+	const records: Record<string, unknown>[] = [];
+
+	for (let i = 1; i < lines.length; i++) {
+		const values = lines[i].split(',');
+		const record: Record<string, unknown> = {};
+
+		headers.forEach((header, index) => {
+			let value = values[index] || '';
+			// Handle quoted values
+			if (value.startsWith('"') && value.endsWith('"')) {
+				value = value.slice(1, -1).replace(/""/g, '"');
+			}
+			record[header] = value;
+		});
+
+		records.push(record);
+	}
+
+	return records;
 }
