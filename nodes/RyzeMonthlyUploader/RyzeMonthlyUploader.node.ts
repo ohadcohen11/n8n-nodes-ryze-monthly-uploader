@@ -104,15 +104,15 @@ export class RyzeMonthlyUploader implements INodeType {
 				placeholder: '3000',
 				description: 'Your scraper script ID',
 			},
-			// IO ID (Required only for Translated)
+			// IO ID (Optional for Translated, auto-detected for Processed)
 			{
 				displayName: 'IO ID',
 				name: 'ioId',
 				type: 'string',
 				default: '',
-				required: true,
-				placeholder: 'eab7e510-eb50-11e9-b544-fb4e13fb7f1d',
-				description: 'Brand identifier - required for Translated, auto-detected for Processed',
+				required: false,
+				placeholder: 'eab7e510-eb50-11e9-b544-fb4e13fb7f1d (optional)',
+				description: 'Brand identifier - optional for Translated (uses "NotSetIoID" if empty), auto-detected for Processed',
 				displayOptions: {
 					show: {
 						uploadType: ['Translated'],
@@ -225,8 +225,9 @@ export class RyzeMonthlyUploader implements INodeType {
 		// Get IO IDs
 		let ioIds: string[] = [];
 		if (uploadType === 'Translated') {
-			const ioId = this.getNodeParameter('ioId', 0) as string;
-			ioIds = [ioId];
+			const ioId = this.getNodeParameter('ioId', 0, '') as string;
+			// If no IO ID provided, use "NotSetIoID"
+			ioIds = [ioId.trim() || 'NotSetIoID'];
 		} else {
 			// Processed: auto-detect from data
 			const uniqueIoIds = new Set<string>();
@@ -236,13 +237,13 @@ export class RyzeMonthlyUploader implements INodeType {
 				}
 			}
 			ioIds = Array.from(uniqueIoIds);
-		}
 
-		if (ioIds.length === 0) {
-			throw new NodeOperationError(
-				this.getNode(),
-				'No IO IDs found. For Translated, provide IO ID parameter. For Processed, ensure data contains io_id field.',
-			);
+			if (ioIds.length === 0) {
+				throw new NodeOperationError(
+					this.getNode(),
+					'No IO IDs found in Processed data. Ensure data contains io_id field.',
+				);
+			}
 		}
 
 		// Query brand groups from MySQL
@@ -267,6 +268,15 @@ export class RyzeMonthlyUploader implements INodeType {
 		};
 
 		for (const ioId of ioIds) {
+			// Skip MySQL lookup for NotSetIoID - use it as brand_group_id directly
+			if (ioId === 'NotSetIoID') {
+				brandGroups.set(ioId, {
+					brand_group_id: 'NotSetIoID',
+					brand_group_name: 'No IO ID Set',
+				});
+				continue;
+			}
+
 			try {
 				// Trim whitespace from IO ID
 				const cleanIoId = ioId.trim();
