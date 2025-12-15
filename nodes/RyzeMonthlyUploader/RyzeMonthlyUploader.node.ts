@@ -330,7 +330,30 @@ export class RyzeMonthlyUploader implements INodeType {
 			// Filter items for this brand
 			let brandItems = items;
 			if (uploadType === 'Processed') {
-				brandItems = items.filter((item) => item.json.io_id === ioId);
+				// Calculate last day of the month
+				const lastDayOfMonth = new Date(parseInt(year), parseInt(month), 0).getDate();
+
+				brandItems = items.filter((item) => {
+					// Filter by io_id
+					if (item.json.io_id !== ioId) return false;
+
+					// Filter by last day of the month
+					if (item.json.date) {
+						const itemDate = new Date(item.json.date as string);
+						const itemDay = itemDate.getDate();
+						const itemMonth = itemDate.getMonth() + 1;
+						const itemYear = itemDate.getFullYear();
+
+						// Only include items from the last day of the target month
+						return (
+							itemYear === parseInt(year) &&
+							itemMonth === parseInt(month) &&
+							itemDay === lastDayOfMonth
+						);
+					}
+
+					return false;
+				});
 			}
 
 			totalRowsInput += brandItems.length;
